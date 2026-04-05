@@ -1,0 +1,332 @@
+{
+  "info": {
+    "name": "PMS Sync Worker — TravelHub",
+    "description": "Colección Postman para el servicio pms-sync-worker del proyecto TravelHub (MISW4501 — Grupo 9 — Uniandes).\n\nEste worker consume comandos de sincronización desde Kafka (`pms-sync-queue`) y expone un único endpoint HTTP para health checks.\n\nLos ejemplos de payload son los mensajes que el API (pms-integration-services) publica en Kafka y que este worker procesa.",
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "URL base del servicio. Cambiar según entorno."
+    },
+    {
+      "key": "cloud_run_url",
+      "value": "https://pms-sync-worker-PLACEHOLDER.us-central1.run.app",
+      "type": "string",
+      "description": "URL del servicio desplegado en Cloud Run."
+    },
+    {
+      "key": "hotel_id",
+      "value": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "string"
+    },
+    {
+      "key": "event_id",
+      "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "type": "string"
+    },
+    {
+      "key": "room_id",
+      "value": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Status",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica que el servicio está corriendo. Usado por Cloud Run para health checks.\n\n**Respuesta esperada:**\n```json\n{\"status\": \"healthy\", \"service\": \"pms-sync-worker\"}\n```"
+          },
+          "response": [
+            {
+              "name": "200 OK — Healthy",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {"key": "Content-Type", "value": "application/json"}
+              ],
+              "body": "{\n  \"status\": \"healthy\",\n  \"service\": \"pms-sync-worker\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        }
+      ],
+      "description": "Endpoints de estado del servicio."
+    },
+    {
+      "name": "Kafka Messages — availability_update",
+      "description": "Ejemplos de mensajes Kafka para el event_type `availability_update`.\n\nEstos mensajes son publicados por `pms-integration-services` en el topic `pms-sync-queue` y consumidos por este worker.\n\n**Nota:** No son llamadas HTTP directas al worker. Se usan para simular o documentar el contrato del mensaje Kafka.",
+      "item": [
+        {
+          "name": "[KAFKA] availability_update — básico",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"{{event_id}}\",\n  \"event_type\": \"availability_update\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"sabre\",\n  \"pms_property_id\": \"SABRE-001\",\n  \"retry_count\": 0,\n  \"data\": {\n    \"room_mappings\": {\n      \"PMS-ROOM-001\": \"{{room_id}}\"\n    },\n    \"dates\": [\n      {\n        \"pms_room_id\": \"PMS-ROOM-001\",\n        \"fecha\": \"2025-07-01\",\n        \"unidades_disponibles\": 5\n      },\n      {\n        \"pms_room_id\": \"PMS-ROOM-001\",\n        \"fecha\": \"2025-07-02\",\n        \"unidades_disponibles\": 4\n      },\n      {\n        \"pms_room_id\": \"PMS-ROOM-001\",\n        \"fecha\": \"2025-07-03\",\n        \"unidades_disponibles\": 3\n      }\n    ]\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "**SyncCommand — availability_update**\n\nActualiza la disponibilidad de una habitación para un rango de fechas.\n\n**Campos:**\n- `event_id`: UUID único del evento (idempotencia)\n- `event_type`: `availability_update`\n- `hotel_id`: UUID del hotel en TravelHub\n- `pms_provider`: Nombre del proveedor PMS (`sabre`, `opera`, `cloudbeds`, etc.)\n- `pms_property_id`: ID de la propiedad en el PMS\n- `retry_count`: Número de reintentos (0 = primer intento)\n- `data.room_mappings`: Mapeo `pms_room_id → room_id TravelHub`\n- `data.dates`: Lista de entradas con fecha y disponibilidad\n\n**Procesamiento:**\n1. Mapea `pms_room_id` → `room_id` interno\n2. UPSERT en tabla `availability` (INSERT ON CONFLICT DO UPDATE)\n3. Detecta conflictos (disponibles < reservadas)\n4. Notifica a notification-services si hay conflictos"
+          },
+          "response": []
+        },
+        {
+          "name": "[KAFKA] availability_update — batch 7 días",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"a1b2c3d4-0000-0000-0000-000000000001\",\n  \"event_type\": \"availability_update\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"opera\",\n  \"pms_property_id\": \"OPERA-HOTEL-42\",\n  \"retry_count\": 0,\n  \"data\": {\n    \"room_mappings\": {\n      \"101\": \"{{room_id}}\"\n    },\n    \"dates\": [\n      {\"pms_room_id\": \"101\", \"fecha\": \"2025-08-01\", \"unidades_disponibles\": 2},\n      {\"pms_room_id\": \"101\", \"fecha\": \"2025-08-02\", \"unidades_disponibles\": 2},\n      {\"pms_room_id\": \"101\", \"fecha\": \"2025-08-03\", \"unidades_disponibles\": 1},\n      {\"pms_room_id\": \"101\", \"fecha\": \"2025-08-04\", \"unidades_disponibles\": 0},\n      {\"pms_room_id\": \"101\", \"fecha\": \"2025-08-05\", \"unidades_disponibles\": 0},\n      {\"pms_room_id\": \"101\", \"fecha\": \"2025-08-06\", \"unidades_disponibles\": 3},\n      {\"pms_room_id\": \"101\", \"fecha\": \"2025-08-07\", \"unidades_disponibles\": 3}\n    ]\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "Actualización de disponibilidad para 7 días consecutivos. Simula la sincronización semanal típica de un PMS."
+          },
+          "response": []
+        },
+        {
+          "name": "[KAFKA] availability_update — con conflicto (overbooking)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"a1b2c3d4-0000-0000-0000-000000000002\",\n  \"event_type\": \"availability_update\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"sabre\",\n  \"pms_property_id\": \"SABRE-001\",\n  \"retry_count\": 0,\n  \"data\": {\n    \"room_mappings\": {\n      \"PMS-ROOM-001\": \"{{room_id}}\"\n    },\n    \"dates\": [\n      {\n        \"pms_room_id\": \"PMS-ROOM-001\",\n        \"fecha\": \"2025-09-15\",\n        \"unidades_disponibles\": 0\n      }\n    ]\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "**Escenario de conflicto crítico:**\n\nEl PMS reporta `unidades_disponibles=0` pero TravelHub tiene reservas activas para esa fecha.\n\n**Comportamiento esperado:**\n1. Worker actualiza `availability.unidades_disponibles = 0`\n2. Detecta conflicto: `disponibles (0) < reservadas (N)`\n3. Clasifica como `critical_zero_availability`\n4. Llama a `notification-services` con recipients `[\"hotel_admin\", \"platform_admin\"]`\n5. NO cancela reservas automáticamente\n6. Marca `sync_events.status = \"completed\"` (el conflicto es un resultado válido)"
+          },
+          "response": []
+        },
+        {
+          "name": "[KAFKA] availability_update — reintento (retry_count=1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"a1b2c3d4-0000-0000-0000-000000000003\",\n  \"event_type\": \"availability_update\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"sabre\",\n  \"pms_property_id\": \"SABRE-001\",\n  \"retry_count\": 1,\n  \"data\": {\n    \"room_mappings\": {\"PMS-ROOM-001\": \"{{room_id}}\"},\n    \"dates\": [\n      {\"pms_room_id\": \"PMS-ROOM-001\", \"fecha\": \"2025-07-10\", \"unidades_disponibles\": 3}\n    ]\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "Mensaje con `retry_count=1`, indicando que es el segundo intento.\n\nEl worker procesará normalmente. Si falla de nuevo y `retry_count < MAX_RETRIES (3)`, re-publicará con `retry_count=2`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Kafka Messages — rate_update",
+      "description": "Ejemplos de mensajes Kafka para el event_type `rate_update`.\n\nActualiza tarifas en la tabla `tariffs` via UPSERT.",
+      "item": [
+        {
+          "name": "[KAFKA] rate_update — tarifa simple",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"b2c3d4e5-0000-0000-0000-000000000001\",\n  \"event_type\": \"rate_update\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"cloudbeds\",\n  \"pms_property_id\": \"CB-HOTEL-99\",\n  \"retry_count\": 0,\n  \"data\": {\n    \"room_mappings\": {\n      \"CB-ROOM-STD\": \"{{room_id}}\"\n    },\n    \"rates\": [\n      {\n        \"pms_room_id\": \"CB-ROOM-STD\",\n        \"fecha_inicio\": \"2025-07-01\",\n        \"fecha_fin\": \"2025-07-31\",\n        \"precio_por_noche\": 120.00,\n        \"moneda\": \"USD\"\n      }\n    ]\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "**SyncCommand — rate_update**\n\nActualiza tarifas para un rango de fechas.\n\n**Campos en `data.rates`:**\n- `pms_room_id`: ID de la habitación en el PMS\n- `fecha_inicio` / `fecha_fin`: Rango de vigencia de la tarifa\n- `precio_por_noche`: Precio en la moneda indicada\n- `moneda`: Código ISO 4217 (USD, COP, EUR, etc.)\n\n**Comportamiento:**\n- Si ya existe una tarifa para `(room_id, fecha_inicio, fecha_fin)` → actualiza el precio\n- Si no existe → inserta nueva tarifa"
+          },
+          "response": []
+        },
+        {
+          "name": "[KAFKA] rate_update — múltiples tarifas (temporada)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"b2c3d4e5-0000-0000-0000-000000000002\",\n  \"event_type\": \"rate_update\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"sabre\",\n  \"pms_property_id\": \"SABRE-001\",\n  \"retry_count\": 0,\n  \"data\": {\n    \"room_mappings\": {\n      \"PMS-ROOM-001\": \"{{room_id}}\"\n    },\n    \"rates\": [\n      {\n        \"pms_room_id\": \"PMS-ROOM-001\",\n        \"fecha_inicio\": \"2025-12-20\",\n        \"fecha_fin\": \"2026-01-05\",\n        \"precio_por_noche\": 280.00,\n        \"moneda\": \"USD\"\n      },\n      {\n        \"pms_room_id\": \"PMS-ROOM-001\",\n        \"fecha_inicio\": \"2026-01-06\",\n        \"fecha_fin\": \"2026-03-31\",\n        \"precio_por_noche\": 150.00,\n        \"moneda\": \"USD\"\n      }\n    ]\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "Actualización de tarifas para dos temporadas: temporada alta (diciembre-enero) y temporada baja (enero-marzo)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Kafka Messages — property_sync",
+      "description": "Ejemplos de mensajes Kafka para el event_type `property_sync`.\n\nSincronización completa de una propiedad: hotel info, rooms, availability y tarifas en una sola transacción.",
+      "item": [
+        {
+          "name": "[KAFKA] property_sync — sincronización completa",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"c3d4e5f6-0000-0000-0000-000000000001\",\n  \"event_type\": \"property_sync\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"opera\",\n  \"pms_property_id\": \"OPERA-HOTEL-42\",\n  \"retry_count\": 0,\n  \"data\": {\n    \"property_info\": {\n      \"nombre\": \"Hotel Boutique Candelaria\",\n      \"direccion\": \"Calle 12 #4-72\",\n      \"ciudad\": \"Bogotá\",\n      \"pais\": \"Colombia\"\n    },\n    \"rooms\": [\n      {\n        \"pms_room_id\": \"OPERA-101\",\n        \"nombre\": \"Habitación Estándar\",\n        \"capacidad\": 2\n      },\n      {\n        \"pms_room_id\": \"OPERA-201\",\n        \"nombre\": \"Suite Junior\",\n        \"capacidad\": 3\n      }\n    ],\n    \"availability\": [\n      {\"pms_room_id\": \"OPERA-101\", \"fecha\": \"2025-07-01\", \"unidades_disponibles\": 1},\n      {\"pms_room_id\": \"OPERA-101\", \"fecha\": \"2025-07-02\", \"unidades_disponibles\": 1},\n      {\"pms_room_id\": \"OPERA-201\", \"fecha\": \"2025-07-01\", \"unidades_disponibles\": 2},\n      {\"pms_room_id\": \"OPERA-201\", \"fecha\": \"2025-07-02\", \"unidades_disponibles\": 2}\n    ],\n    \"tariffs\": [\n      {\n        \"pms_room_id\": \"OPERA-101\",\n        \"fecha_inicio\": \"2025-07-01\",\n        \"fecha_fin\": \"2025-07-31\",\n        \"precio_por_noche\": 95.00,\n        \"moneda\": \"USD\"\n      },\n      {\n        \"pms_room_id\": \"OPERA-201\",\n        \"fecha_inicio\": \"2025-07-01\",\n        \"fecha_fin\": \"2025-07-31\",\n        \"precio_por_noche\": 180.00,\n        \"moneda\": \"USD\"\n      }\n    ]\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "**SyncCommand — property_sync**\n\nSincronización completa de una propiedad. Ejecuta en una sola transacción:\n1. Actualiza info del hotel (nombre, dirección, etc.)\n2. Sincroniza habitaciones: crea nuevas, desactiva eliminadas\n3. UPSERT availability para todas las habitaciones\n4. UPSERT tarifas\n\n**Todo o nada:** Si falla cualquier paso, la transacción hace rollback completo."
+          },
+          "response": []
+        },
+        {
+          "name": "[KAFKA] property_sync — solo info del hotel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"c3d4e5f6-0000-0000-0000-000000000002\",\n  \"event_type\": \"property_sync\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"sabre\",\n  \"pms_property_id\": \"SABRE-001\",\n  \"retry_count\": 0,\n  \"data\": {\n    \"property_info\": {\n      \"nombre\": \"Hotel Gran Colonial — Nombre Actualizado\",\n      \"ciudad\": \"Medellín\"\n    }\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "Actualización parcial: solo se actualiza la información del hotel. No se sincroniza availability ni tarifas."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Errores y casos borde",
+      "description": "Mensajes que generan errores conocidos para validar el comportamiento del worker.",
+      "item": [
+        {
+          "name": "[KAFKA] event_type desconocido → NonRetryableError",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"d4e5f6a7-0000-0000-0000-000000000001\",\n  \"event_type\": \"unknown_event\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"sabre\",\n  \"pms_property_id\": \"SABRE-001\",\n  \"retry_count\": 0,\n  \"data\": {}\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "**Comportamiento esperado:**\n- El worker lanza `NonRetryableError`\n- Marca `sync_events.status = \"failed\"`\n- Commitea el offset Kafka (no reintenta)\n- Loggea el error\n\nNo se hace retry porque no hay estrategia para este tipo de evento."
+          },
+          "response": []
+        },
+        {
+          "name": "[KAFKA] max retries excedidos → failed definitivo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{base_url}}/_simulate/kafka",
+              "host": ["{{base_url}}"],
+              "path": ["_simulate", "kafka"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"d4e5f6a7-0000-0000-0000-000000000002\",\n  \"event_type\": \"availability_update\",\n  \"hotel_id\": \"{{hotel_id}}\",\n  \"pms_provider\": \"sabre\",\n  \"pms_property_id\": \"SABRE-001\",\n  \"retry_count\": 3,\n  \"data\": {\n    \"room_mappings\": {},\n    \"dates\": []\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "description": "**Comportamiento esperado con `retry_count=3` (igual a MAX_RETRIES):**\n- El worker intenta procesar\n- Si falla, NO re-publica (retry_count >= MAX_RETRIES)\n- Marca `sync_events.status = \"failed\"`\n- Commitea el offset (mensaje queda procesado, va a DLQ en producción)"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [""]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Test genérico para /health",
+          "if (pm.request.url.toString().includes('/health')) {",
+          "  pm.test('Health check returns 200', function () {",
+          "    pm.response.to.have.status(200);",
+          "  });",
+          "  pm.test('Response has status healthy', function () {",
+          "    const json = pm.response.json();",
+          "    pm.expect(json.status).to.eql('healthy');",
+          "    pm.expect(json.service).to.eql('pms-sync-worker');",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ]
+}
