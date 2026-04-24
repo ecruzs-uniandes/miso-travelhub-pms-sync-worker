@@ -89,7 +89,7 @@ jobs:
             --region=${{ env.REGION }} \
             --image=${{ env.DEV_IMAGE }}:${{ github.sha }} \
             --port=8000 --allow-unauthenticated \
-            --vpc-connector=travelhub-connector \
+            --network=travelhub-vpc --subnet=subnet-services \
             --vpc-egress=private-ranges-only \
             --min-instances=1 --max-instances=5 \
             --set-env-vars="SERVICE_NAME=pms-sync-worker,SERVICE_PORT=8000,KAFKA_ENABLED=true,KAFKA_TOPIC_PMS_SYNC=pms-sync-queue,KAFKA_CONSUMER_GROUP=pms-sync-worker-group,MAX_RETRIES=3,RETRY_BACKOFF_BASE=2,CB_FAILURE_THRESHOLD=5,CB_RECOVERY_TIMEOUT=30" \
