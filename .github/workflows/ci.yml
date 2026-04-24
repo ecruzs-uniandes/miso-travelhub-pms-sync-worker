@@ -89,6 +89,7 @@ jobs:
             --region=${{ env.REGION }} \
             --image=${{ env.DEV_IMAGE }}:${{ github.sha }} \
             --port=8000 --allow-unauthenticated \
+            --clear-vpc-connector \
             --network=travelhub-vpc --subnet=subnet-services \
             --vpc-egress=private-ranges-only \
             --min-instances=1 --max-instances=5 \
