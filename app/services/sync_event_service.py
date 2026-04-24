@@ -12,25 +12,33 @@ class SyncEventService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _find(self, event_id) -> SyncEvent | None:
+        return (
+            self.db.query(SyncEvent)
+            .filter(SyncEvent.event_id == str(event_id))
+            .first()
+        )
+
     def update_status(
         self,
-        event_id: UUID,
+        event_id,
         status: str,
         error_message: str = None,
         processed_at: datetime = None,
     ):
-        event = self.db.query(SyncEvent).filter(SyncEvent.id == event_id).first()
+        event = self._find(event_id)
         if not event:
             logger.warning(f"SyncEvent {event_id} not found, skipping status update")
             return
 
         event.status = status
-        if error_message:
-            event.error_message = error_message
         if processed_at:
             event.processed_at = processed_at
         elif status in ("completed", "failed"):
             event.processed_at = datetime.now(timezone.utc)
+
+        if error_message:
+            logger.error(f"SyncEvent {event_id} error: {error_message}")
 
         self.db.commit()
         logger.debug(f"SyncEvent {event_id} status updated to '{status}'")
@@ -49,8 +57,8 @@ class SyncEventService:
             self.db.commit()
             logger.debug(f"Updated last_sync_at for hotel {hotel_id} / provider {pms_provider}")
 
-    def increment_retry_count(self, event_id: UUID, new_count: int):
-        event = self.db.query(SyncEvent).filter(SyncEvent.id == event_id).first()
+    def increment_retry_count(self, event_id, new_count: int):
+        event = self._find(event_id)
         if event:
-            event.retry_count = str(new_count)
+            event.retry_count = int(new_count)
             self.db.commit()

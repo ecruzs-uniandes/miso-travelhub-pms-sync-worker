@@ -16,7 +16,6 @@ class Availability(Base):
     unidades_reservadas = Column(Integer, default=0)
     ultima_actualizacion = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     fuente_actualizacion = Column(String(50), default="pms_webhook")
-    estado = Column(String(50), default="disponible")
 
     room = relationship("Room", back_populates="availabilities")
 
