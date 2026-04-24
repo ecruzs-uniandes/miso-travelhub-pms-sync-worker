@@ -1,0 +1,32 @@
+apiVersion: skaffold/v4beta7
+kind: Config
+metadata:
+  name: pms-sync-worker
+profiles:
+  - name: prod
+    manifests:
+      rawYaml:
+        - k8s/service-prod.yaml
+    deploy:
+      cloudrun: {}
+    verify:
+      - name: verify-health
+        container:
+          name: verify-health
+          image: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+          command: ["/bin/sh"]
+          args:
+            - "-c"
+            - |
+              SERVICE_URL=$(echo $CLOUD_RUN_SERVICE_URLS | cut -d',' -f1)
+              echo "Verifying health at: ${SERVICE_URL}/health"
+              for i in 1 2 3 4 5; do
+                STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/health" || true)
+                if [ "$STATUS" = "200" ]; then
+                  echo "Health check passed (attempt $i)"
+                  exit 0
+                fi
+                echo "Attempt $i: status=$STATUS, retrying in 10s..."
+                sleep 10
+              done
+              exit 1

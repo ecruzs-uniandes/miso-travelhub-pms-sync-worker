@@ -1,0 +1,100 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: pms-sync-worker
+  labels:
+    cloud.googleapis.com/location: us-central1
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/vpc-access-connector: prod-travelhub-connector
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+        - image: pms-sync-worker
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: SERVICE_NAME
+              value: pms-sync-worker
+            - name: SERVICE_PORT
+              value: "8000"
+            - name: KAFKA_ENABLED
+              value: "true"
+            - name: KAFKA_TOPIC_PMS_SYNC
+              value: pms-sync-queue
+            - name: KAFKA_CONSUMER_GROUP
+              value: pms-sync-worker-group
+            - name: MAX_RETRIES
+              value: "3"
+            - name: RETRY_BACKOFF_BASE
+              value: "2"
+            - name: CB_FAILURE_THRESHOLD
+              value: "5"
+            - name: CB_RECOVERY_TIMEOUT
+              value: "30"
+            - name: DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: PMS_DATABASE_HOST
+                  key: latest
+            - name: DATABASE_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: PMS_DATABASE_PORT
+                  key: latest
+            - name: DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: PMS_DATABASE_NAME
+                  key: latest
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: PMS_DATABASE_USER
+                  key: latest
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: PMS_DATABASE_PASSWORD
+                  key: latest
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              valueFrom:
+                secretKeyRef:
+                  name: KAFKA_BOOTSTRAP_SERVERS
+                  key: latest
+            - name: NOTIFICATION_SERVICE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: NOTIFICATION_SERVICE_URL
+                  key: latest
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
