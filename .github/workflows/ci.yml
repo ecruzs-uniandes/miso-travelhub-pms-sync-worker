@@ -58,13 +58,13 @@ jobs:
         run: ruff check app/ tests/ || true
 
   # ── DEV: deploy directo a Cloud Run (worker) ──
-  # DESACTIVADO HASTA FASE 2 (requiere Kafka en GCP).
   deploy-dev:
     name: Deploy to Dev (Cloud Run)
     runs-on: ubuntu-latest
     needs: [tests, lint]
-    # TODO Fase 2
-    if: false
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/feature/'))
     permissions:
       contents: read
       id-token: write
@@ -89,6 +89,8 @@ jobs:
             --region=${{ env.REGION }} \
             --image=${{ env.DEV_IMAGE }}:${{ github.sha }} \
             --port=8000 --allow-unauthenticated \
+            --vpc-connector=travelhub-connector \
+            --vpc-egress=private-ranges-only \
             --min-instances=1 --max-instances=5 \
             --set-env-vars="SERVICE_NAME=pms-sync-worker,SERVICE_PORT=8000,KAFKA_ENABLED=true,KAFKA_TOPIC_PMS_SYNC=pms-sync-queue,KAFKA_CONSUMER_GROUP=pms-sync-worker-group,MAX_RETRIES=3,RETRY_BACKOFF_BASE=2,CB_FAILURE_THRESHOLD=5,CB_RECOVERY_TIMEOUT=30" \
             --set-secrets="DATABASE_HOST=PMS_DATABASE_HOST:latest,DATABASE_PORT=PMS_DATABASE_PORT:latest,DATABASE_NAME=PMS_DATABASE_NAME:latest,DATABASE_USER=PMS_DATABASE_USER:latest,DATABASE_PASSWORD=PMS_DATABASE_PASSWORD:latest,KAFKA_BOOTSTRAP_SERVERS=KAFKA_BOOTSTRAP_SERVERS:latest,NOTIFICATION_SERVICE_URL=NOTIFICATION_SERVICE_URL:latest" \
