@@ -1,27 +1,30 @@
 import uuid
 import time
-import pytest
 from datetime import date, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from app.schemas.sync_command import SyncCommand
 from app.strategies.availability_update import AvailabilityUpdateStrategy
 from app.models.availability import Availability
 
 
-pytestmark = pytest.mark.skip(reason="TODO: actualizar tests tras alineacion de modelos SQLAlchemy con schema real PostgreSQL")
-
 def make_command(hotel_id, room_id, dates_data):
+    """Construye un SyncCommand con el payload format ACTUAL.
+
+    El nuevo formato (post alineacion con webhook real):
+      data.room_id: str UUID directo
+      data.dates[i].date: ISO string
+      data.dates[i].available_units: int
+    """
     return SyncCommand(
-        event_id=uuid.uuid4(),
+        event_id=str(uuid.uuid4()),
         event_type="availability_update",
         hotel_id=hotel_id,
         pms_provider="sabre",
         pms_property_id="SABRE-001",
         data={
-            "room_mappings": {
-                "PMS-001": str(room_id),
-            },
+            "room_id": str(room_id),
+            "room_type": "Standard",
             "dates": dates_data,
         },
     )
@@ -32,7 +35,7 @@ def test_availability_update_creates_records(db, hotel, room):
         hotel_id=hotel.id,
         room_id=room.id,
         dates_data=[
-            {"pms_room_id": "PMS-001", "fecha": "2025-07-01", "unidades_disponibles": 3},
+            {"date": "2025-07-01", "available_units": 3},
         ],
     )
 
@@ -47,6 +50,7 @@ def test_availability_update_creates_records(db, hotel, room):
 
     assert record is not None
     assert record.unidades_disponibles == 3
+    assert record.fuente_actualizacion == "pms_webhook"
 
 
 def test_availability_update_upserts_existing(db, hotel, room, availability):
@@ -56,7 +60,7 @@ def test_availability_update_upserts_existing(db, hotel, room, availability):
         hotel_id=hotel.id,
         room_id=room.id,
         dates_data=[
-            {"pms_room_id": "PMS-001", "fecha": str(availability.fecha), "unidades_disponibles": 10},
+            {"date": str(availability.fecha), "available_units": 10},
         ],
     )
 
@@ -71,9 +75,8 @@ def test_availability_update_upserts_existing(db, hotel, room, availability):
 def test_availability_update_batch_performance(db, hotel, room):
     dates_data = [
         {
-            "pms_room_id": "PMS-001",
-            "fecha": str(date(2025, 8, 1) + timedelta(days=i)),
-            "unidades_disponibles": i % 5,
+            "date": str(date(2025, 8, 1) + timedelta(days=i)),
+            "available_units": i % 5,
         }
         for i in range(100)
     ]
@@ -96,12 +99,11 @@ def test_availability_conflict_detected(db, hotel, room, mock_notification_clien
         hotel_id=hotel.id,
         room_id=room.id,
         dates_data=[
-            {"pms_room_id": "PMS-001", "fecha": "2025-09-01", "unidades_disponibles": 1},
+            {"date": "2025-09-01", "available_units": 1},
         ],
     )
 
-    from app.models.availability import Availability as Av
-    conflict_av = Av(
+    conflict_av = Availability(
         id=uuid.uuid4(),
         room_id=room.id,
         fecha=date(2025, 9, 1),
@@ -112,8 +114,32 @@ def test_availability_conflict_detected(db, hotel, room, mock_notification_clien
     db.add(conflict_av)
     db.commit()
 
-    with patch("app.strategies.availability_update.NotificationClient", return_value=mock_notification_client):
+    with patch(
+        "app.strategies.availability_update.NotificationClient",
+        return_value=mock_notification_client,
+    ):
         strategy = AvailabilityUpdateStrategy()
         strategy.execute(command, db)
 
     mock_notification_client.notify_conflict.assert_called()
+
+
+def test_availability_update_skips_when_room_id_missing(db, hotel, room):
+    command = SyncCommand(
+        event_id=str(uuid.uuid4()),
+        event_type="availability_update",
+        hotel_id=hotel.id,
+        pms_provider="sabre",
+        pms_property_id="SABRE-001",
+        data={
+            # sin room_id - strategy debe skip sin error
+            "dates": [{"date": "2025-10-01", "available_units": 5}],
+        },
+    )
+
+    with patch("app.strategies.availability_update.NotificationClient"):
+        strategy = AvailabilityUpdateStrategy()
+        strategy.execute(command, db)
+
+    count = db.query(Availability).filter(Availability.room_id == room.id).count()
+    assert count == 0

@@ -1,14 +1,10 @@
-import uuid
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from app.schemas.sync_command import SyncCommand
 from app.worker.command_handler import CommandHandler
 from app.resilience.retry_handler import NonRetryableError
-from app.models.sync_event import SyncEvent
 
-
-pytestmark = pytest.mark.skip(reason="TODO: actualizar tests tras alineacion de modelos SQLAlchemy con schema real PostgreSQL")
 
 def make_command(event_id, event_type, hotel_id, pms_property_id):
     return SyncCommand(
@@ -22,11 +18,9 @@ def make_command(event_id, event_type, hotel_id, pms_property_id):
 
 
 def test_routes_to_correct_strategy(db, hotel, pms_property, sync_event):
-    sync_event.event_type = "availability_update"
-    db.commit()
-
+    """sync_event fixture crea uno con event_id='evt-test-001' (str)."""
     command = make_command(
-        event_id=sync_event.id,
+        event_id=sync_event.event_id,
         event_type="availability_update",
         hotel_id=hotel.id,
         pms_property_id=pms_property.pms_property_id,
@@ -42,7 +36,7 @@ def test_routes_to_correct_strategy(db, hotel, pms_property, sync_event):
 
 def test_unknown_event_type_raises_error(db, hotel, pms_property, sync_event):
     command = make_command(
-        event_id=sync_event.id,
+        event_id=sync_event.event_id,
         event_type="unknown_type",
         hotel_id=hotel.id,
         pms_property_id=pms_property.pms_property_id,
@@ -55,7 +49,7 @@ def test_unknown_event_type_raises_error(db, hotel, pms_property, sync_event):
 
 def test_updates_sync_event_status(db, hotel, pms_property, sync_event):
     command = make_command(
-        event_id=sync_event.id,
+        event_id=sync_event.event_id,
         event_type="availability_update",
         hotel_id=hotel.id,
         pms_property_id=pms_property.pms_property_id,
@@ -68,3 +62,4 @@ def test_updates_sync_event_status(db, hotel, pms_property, sync_event):
 
     db.refresh(sync_event)
     assert sync_event.status == "completed"
+    assert sync_event.processed_at is not None

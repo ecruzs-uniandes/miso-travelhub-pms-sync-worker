@@ -10,7 +10,11 @@ from app.models.availability import Availability
 from app.models.tariff import Tariff
 
 
-pytestmark = pytest.mark.skip(reason="TODO: actualizar tests tras alineacion de modelos SQLAlchemy con schema real PostgreSQL")
+pytestmark = pytest.mark.skip(
+    reason="PropertySyncStrategy aun no fue actualizada al payload real del webhook. "
+    "Strategy actualmente espera campos legacy (room_mappings, etc). "
+    "Reactivar tests cuando se alinee la strategy con el formato webhook."
+)
 
 def make_command(hotel_id, data):
     return SyncCommand(

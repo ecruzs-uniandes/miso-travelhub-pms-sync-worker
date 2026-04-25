@@ -3,7 +3,7 @@ import pytest
 from datetime import date
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from app.database import Base
 from app.models.hotel import Hotel
@@ -81,14 +81,19 @@ def pms_property(db, hotel):
 
 
 @pytest.fixture
-def sync_event(db, pms_property):
+def sync_event(db, hotel):
+    """Creates a SyncEvent matching the real PG schema:
+    event_id (str unique), hotel_id, pms_provider, event_type, payload_hash,
+    status, retry_count (int)."""
     event = SyncEvent(
         id=uuid.uuid4(),
-        pms_property_id=pms_property.id,
+        event_id="evt-test-001",
+        pms_provider="sabre",
+        hotel_id=hotel.id,
         event_type="availability_update",
+        payload_hash="abc123",
         status="queued",
-        payload={},
-        retry_count="0",
+        retry_count=0,
     )
     db.add(event)
     db.commit()
