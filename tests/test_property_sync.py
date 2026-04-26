@@ -1,24 +1,16 @@
 import uuid
 import pytest
-from unittest.mock import patch
 
 from app.schemas.sync_command import SyncCommand
 from app.strategies.property_sync import PropertySyncStrategy
-from app.models.hotel import Hotel
 from app.models.room import Room
 from app.models.availability import Availability
 from app.models.tariff import Tariff
 
 
-pytestmark = pytest.mark.skip(
-    reason="PropertySyncStrategy aun no fue actualizada al payload real del webhook. "
-    "Strategy actualmente espera campos legacy (room_mappings, etc). "
-    "Reactivar tests cuando se alinee la strategy con el formato webhook."
-)
-
 def make_command(hotel_id, data):
     return SyncCommand(
-        event_id=uuid.uuid4(),
+        event_id=f"evt-{uuid.uuid4()}",
         event_type="property_sync",
         hotel_id=hotel_id,
         pms_provider="sabre",

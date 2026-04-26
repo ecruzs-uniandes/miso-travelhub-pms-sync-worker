@@ -7,15 +7,9 @@ from app.strategies.rate_update import RateUpdateStrategy
 from app.models.tariff import Tariff
 
 
-pytestmark = pytest.mark.skip(
-    reason="RateUpdateStrategy aun no fue actualizada al payload real del webhook. "
-    "Strategy actualmente espera campos legacy (room_mappings, etc). "
-    "Reactivar tests cuando se alinee la strategy con el formato webhook."
-)
-
 def make_rate_command(hotel_id, room_id, rates):
     return SyncCommand(
-        event_id=uuid.uuid4(),
+        event_id=f"evt-{uuid.uuid4()}",
         event_type="rate_update",
         hotel_id=hotel_id,
         pms_provider="sabre",
