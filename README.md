@@ -1,6 +1,6 @@
 # pms-sync-worker
 
-Worker de sincronización PMS para **TravelHub** — MISW4501 Grupo 9 — Uniandes.
+Worker de sincronización PMS para **TravelHub** — MISW4501 Grupo 9 — Uniandes
 
 Consume comandos del topic Kafka `pms-sync-queue` y los procesa contra PostgreSQL: actualiza disponibilidad, tarifas y estado de sincronización.
 
