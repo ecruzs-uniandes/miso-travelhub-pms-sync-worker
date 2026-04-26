@@ -82,31 +82,39 @@ GET http://localhost:8000/health
 
 ## Contrato Kafka — SyncCommand
 
-Todos los mensajes en el topic `pms-sync-queue` siguen este esquema base:
+Todos los mensajes en el topic `pms-sync-queue` siguen este esquema base (publicados por `pms-integration-services` cuando recibe un webhook):
 
 ```json
 {
-  "event_id": "uuid-v4",
+  "command_id": "uuid-v4-generado-por-integration",
+  "event_id": "evt-2026-001",
   "event_type": "availability_update | rate_update | property_sync",
   "hotel_id": "uuid-v4",
-  "pms_provider": "sabre | opera | cloudbeds | ...",
+  "pms_provider": "hotelbeds | sabre | opera | ...",
   "pms_property_id": "string",
+  "timestamp": "2026-04-25T10:00:00Z",
   "retry_count": 0,
-  "correlation_id": "opcional-para-trazabilidad",
-  "data": { ... }
+  "data": { ... },
+  "correlation_id": null,
+  "created_at": "2026-04-25T10:00:00.123Z"
 }
 ```
 
 | Campo | Tipo | Requerido | Descripción |
 |---|---|---|---|
-| `event_id` | UUID | Sí | Identificador único del evento. Garantiza idempotencia. |
-| `event_type` | string | Sí | Tipo de operación: `availability_update`, `rate_update`, `property_sync` |
-| `hotel_id` | UUID | Sí | ID del hotel en TravelHub |
-| `pms_provider` | string | Sí | Nombre del proveedor PMS |
-| `pms_property_id` | string | Sí | ID de la propiedad en el PMS externo |
-| `retry_count` | int | No (default: 0) | Número de reintentos previos |
-| `correlation_id` | string | No | ID para correlacionar con el request HTTP original |
-| `data` | object | Sí | Payload específico según `event_type` |
+| `command_id` | UUID | No | Generado por `SyncCommand.create()` en pms-integration. |
+| `event_id` | string | Sí | Identificador único del evento (string libre, **no UUID**). Clave de idempotencia. |
+| `event_type` | string | Sí | Tipo: `availability_update`, `rate_update`, `property_sync`. Otros → `NonRetryableError`. |
+| `hotel_id` | UUID | Sí | ID del hotel en TravelHub. |
+| `pms_provider` | string | Sí | Nombre del proveedor PMS (`hotelbeds`, `sabre`, ...). |
+| `pms_property_id` | string | No | ID de la propiedad en el PMS externo. |
+| `timestamp` | datetime | No | Timestamp original del evento PMS. |
+| `retry_count` | int | No (default 0) | Lo incrementa el consumer al republicar tras un fallo retryable. |
+| `data` | object | Sí | Payload específico por `event_type` (ver secciones abajo). |
+| `correlation_id` | string | No | Trazabilidad opcional. |
+| `created_at` | datetime | No | Cuándo se construyó el comando. |
+
+> **Producer key** = `hotel_id` → garantiza orden por hotel dentro de la misma partición.
 
 ---
 
@@ -117,14 +125,14 @@ Actualiza la disponibilidad de habitaciones para fechas específicas.
 **Payload `data`:**
 ```json
 {
-  "room_mappings": {
-    "PMS-ROOM-001": "uuid-room-travelhub"
-  },
+  "room_id": "uuid-room-travelhub",
+  "room_type": "Suite",
   "dates": [
     {
-      "pms_room_id": "PMS-ROOM-001",
-      "fecha": "2025-07-01",
-      "unidades_disponibles": 5
+      "date": "2025-07-01",
+      "available_units": 5,
+      "rate": 180.00,
+      "currency": "USD"
     }
   ]
 }
@@ -132,39 +140,41 @@ Actualiza la disponibilidad de habitaciones para fechas específicas.
 
 | Campo | Tipo | Descripción |
 |---|---|---|
-| `room_mappings` | object | Mapeo `pms_room_id → room_id TravelHub`. Opcional si las rooms ya tienen `pms_room_id` en BD. |
-| `dates[].pms_room_id` | string | ID de la habitación en el PMS |
-| `dates[].fecha` | string (ISO 8601) | Fecha de disponibilidad (`YYYY-MM-DD`) |
-| `dates[].unidades_disponibles` | int | Unidades disponibles reportadas por el PMS |
+| `room_id` | UUID | ID de la habitación en TravelHub. **Debe existir en `rooms.id`**. (No hay mapeo PMS→TravelHub en esta strategy.) |
+| `room_type` | string | Etiqueta informativa (no se persiste). |
+| `dates[].date` (o `fecha`) | string (`YYYY-MM-DD`) | Fecha de disponibilidad. |
+| `dates[].available_units` (o `unidades_disponibles`) | int | Unidades disponibles reportadas por el PMS. |
 
-**SQL ejecutado:**
+> El strategy acepta tanto las claves en inglés (`date`, `available_units`) como en español (`fecha`, `unidades_disponibles`). Internamente prioriza las inglesas.
+
+**SQL ejecutado (UPSERT por `(room_id, fecha)`):**
 ```sql
-INSERT INTO availability (id, room_id, fecha, unidades_disponibles, unidades_reservadas, ultima_actualizacion, fuente_actualizacion)
-VALUES (gen_random_uuid(), :room_id, :fecha, :disponibles, 0, now(), 'pms_webhook')
-ON CONFLICT (room_id, fecha)
-DO UPDATE SET
-    unidades_disponibles = EXCLUDED.unidades_disponibles,
-    ultima_actualizacion = now(),
-    fuente_actualizacion = 'pms_webhook';
+-- Si existe: actualiza unidades_disponibles + ultima_actualizacion
+-- Si no:    inserta con unidades_reservadas=0, fuente_actualizacion='pms_webhook'
 ```
 
-**Ejemplo completo:**
+Después del upsert el strategy ejecuta `get_conflicts(room_id, fechas)`: si para alguna fecha
+`unidades_disponibles < unidades_reservadas`, el `ConflictResolver` clasifica el conflicto
+(`critical_zero_availability` u `overbooking`) y notifica via `NotificationClient`.
+
+**Ejemplo completo (mensaje en `pms-sync-queue`):**
 ```json
 {
-  "event_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "command_id": "9f1e2d3c-4b5a-6789-abcd-ef0123456789",
+  "event_id": "evt-2026-001",
   "event_type": "availability_update",
-  "hotel_id": "550e8400-e29b-41d4-a716-446655440000",
-  "pms_provider": "sabre",
-  "pms_property_id": "SABRE-001",
+  "hotel_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "pms_provider": "hotelbeds",
+  "pms_property_id": "HB-MDE-001",
+  "timestamp": "2026-04-25T10:00:00Z",
   "retry_count": 0,
   "data": {
-    "room_mappings": {
-      "PMS-ROOM-001": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
-    },
+    "room_id": "b1000000-0000-0000-0000-000000000002",
+    "room_type": "Suite",
     "dates": [
-      {"pms_room_id": "PMS-ROOM-001", "fecha": "2025-07-01", "unidades_disponibles": 5},
-      {"pms_room_id": "PMS-ROOM-001", "fecha": "2025-07-02", "unidades_disponibles": 4},
-      {"pms_room_id": "PMS-ROOM-001", "fecha": "2025-07-03", "unidades_disponibles": 3}
+      {"date": "2026-07-01", "available_units": 5},
+      {"date": "2026-07-02", "available_units": 4},
+      {"date": "2026-07-03", "available_units": 3}
     ]
   }
 }

@@ -39,7 +39,25 @@ app/
 clouddeploy.yaml                  # canary 10→50→100
 skaffold.yaml + k8s/service-prod.yaml
 deploy/deploy.sh                  # script manual dev|prod
+pms-sync-worker.postman_collection.json    # /health + ejemplos de mensajes Kafka
+pms-sync-worker.postman_environment.json   # variables Postman
 ```
+
+## Superficie HTTP / Kafka
+
+Este servicio NO expone API de negocio: la entrada es Kafka, no HTTP.
+
+| Tipo | Endpoint / Topic | Detalle |
+|---|---|---|
+| HTTP | `GET /health` | Liveness para Cloud Run. Devuelve `{status: "healthy", service: "pms-sync-worker"}` (200). |
+| Kafka in | `pms-sync-queue` | Consume `SyncCommand` (`event_type ∈ {availability_update, rate_update, property_sync}`). `enable.auto.commit=false`. |
+| Kafka out (retry) | `pms-sync-queue` | Re-publica con `retry_count++` cuando la strategy lanza excepción retryable. |
+| Kafka out (DLQ) | `pms-sync-dlq` | Mensajes con `retry_count > MAX_RETRIES` o `NonRetryableError`. |
+| HTTP out | `NOTIFICATION_SERVICE_URL` | POST a notification-services cuando el conflict resolver detecta `critical_zero_availability` u `overbooking`. |
+
+> El esquema completo de `SyncCommand` y los `data` por `event_type` están documentados en `README.md` y en `pms-sync-worker.postman_collection.json` (carpetas `Kafka Messages — *`).
+> **Strategy `availability_update` consume `data.room_id` directamente** (UUID de la tabla `rooms` de TravelHub) — no hay mapeo PMS→TravelHub para este event_type. Las strategies `rate_update` y `property_sync` sí usan `pms_room_id` con `room_mappings` o lookup por `Room.pms_room_id`.
+> **Guía de testing end-to-end** (preparar BD, obtener JWT, enviar webhook, ver el worker procesar): ver `../PMS_TESTING_GUIDE.md` en la raíz del monorepo.
 
 ## Despliegue actual
 
