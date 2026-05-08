@@ -64,11 +64,11 @@ Este servicio NO expone API de negocio: la entrada es Kafka, no HTTP.
 | Ambiente | Project | URL | Estado |
 |---|---|---|---|
 | **DEV** | `gen-lang-client-0930444414` | https://pms-sync-worker-ridyy4wz4q-uc.a.run.app | ✅ Auto-deploy via push a `feature/*` o `develop` |
-| **PROD** | `travelhub-prod-492116` | — | ⏸ Pipeline Cloud Deploy creado; deploy con push a `main` (requiere Kafka prod) |
+| **PROD** | `travelhub-prod-492116` | https://pms-sync-worker-qhweqfkejq-uc.a.run.app | ✅ Desplegado 2026-05-08 (Cloud Deploy canary). Conecta a Kafka VM PROD `10.20.3.3:9092` |
 
 ### Branch de trabajo
 
-`feature/ci-cd-setup` — config CI/CD WIF + Cloud Deploy.
+`main` — CI/CD pipeline activo (deploy-prod habilitado en commit `e3400df` de 2026-05-08; antes estaba en `if: false # TODO Fase 2`).
 
 ## Tests skipped (TODO arreglar)
 
