@@ -33,9 +33,11 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        # sslmode=disable: Cloud SQL via private IP ya está en red privada;
+        # evita cuelgue de SSL handshake en Cloud Run direct VPC.
         return (
             f"postgresql://{self.database_user}:{self.database_password}"
-            f"@{self.database_host}:{self.database_port}/{self.database_name}"
+            f"@{self.database_host}:{self.database_port}/{self.database_name}?sslmode=disable"
         )
 
     class Config:

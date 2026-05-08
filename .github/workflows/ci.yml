@@ -1,0 +1,141 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop, "feature/*"]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  REGION: us-central1
+  SERVICE_NAME: pms-sync-worker
+
+  # DEV
+  DEV_PROJECT_ID: gen-lang-client-0930444414
+  DEV_PROJECT_NUMBER: "154299161799"
+  DEV_IMAGE: us-central1-docker.pkg.dev/gen-lang-client-0930444414/pms-sync-worker/pms-sync-worker
+  DEV_WIF_PROVIDER: projects/154299161799/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  DEV_SA: github-deploy-pms-sync-worker@gen-lang-client-0930444414.iam.gserviceaccount.com
+
+  # PROD
+  PROD_PROJECT_ID: travelhub-prod-492116
+  PROD_PROJECT_NUMBER: "974898737307"
+  PROD_IMAGE: us-central1-docker.pkg.dev/travelhub-prod-492116/pms-sync-worker/pms-sync-worker
+  PROD_WIF_PROVIDER: projects/974898737307/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  PROD_SA: github-deploy-pms-sync-worker@travelhub-prod-492116.iam.gserviceaccount.com
+
+jobs:
+  tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests
+        run: pytest -v
+
+  lint:
+    name: Linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install lint tools
+        run: pip install "black>=24,<27" "isort>=5,<9" "ruff>=0.4"
+      - name: black
+        run: black --check app/ tests/ || true
+      - name: isort
+        run: isort --check-only app/ tests/ || true
+      - name: ruff
+        run: ruff check app/ tests/ || true
+
+  # ── DEV: deploy directo a Cloud Run (worker) ──
+  deploy-dev:
+    name: Deploy to Dev (Cloud Run)
+    runs-on: ubuntu-latest
+    needs: [tests, lint]
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/feature/'))
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER }}
+          service_account: ${{ env.DEV_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Docker auth
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+      - name: Build + push
+        run: |
+          docker build -t ${{ env.DEV_IMAGE }}:${{ github.sha }} -t ${{ env.DEV_IMAGE }}:latest .
+          docker push --all-tags ${{ env.DEV_IMAGE }}
+      - name: Deploy Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --project=${{ env.DEV_PROJECT_ID }} \
+            --region=${{ env.REGION }} \
+            --image=${{ env.DEV_IMAGE }}:${{ github.sha }} \
+            --port=8000 --allow-unauthenticated \
+            --clear-vpc-connector \
+            --network=travelhub-vpc --subnet=subnet-services \
+            --vpc-egress=private-ranges-only \
+            --min-instances=1 --max-instances=5 \
+            --set-env-vars="SERVICE_NAME=pms-sync-worker,SERVICE_PORT=8000,KAFKA_ENABLED=true,KAFKA_TOPIC_PMS_SYNC=pms-sync-queue,KAFKA_CONSUMER_GROUP=pms-sync-worker-group,MAX_RETRIES=3,RETRY_BACKOFF_BASE=2,CB_FAILURE_THRESHOLD=5,CB_RECOVERY_TIMEOUT=30" \
+            --set-secrets="DATABASE_HOST=PMS_DATABASE_HOST:latest,DATABASE_PORT=PMS_DATABASE_PORT:latest,DATABASE_NAME=PMS_DATABASE_NAME:latest,DATABASE_USER=PMS_DATABASE_USER:latest,DATABASE_PASSWORD=PMS_DATABASE_PASSWORD:latest,KAFKA_BOOTSTRAP_SERVERS=KAFKA_BOOTSTRAP_SERVERS:latest,NOTIFICATION_SERVICE_URL=NOTIFICATION_SERVICE_URL:latest" \
+            --quiet
+
+  # ── PROD: Cloud Deploy canary ──
+  # DESACTIVADO HASTA FASE 2.
+  deploy-prod:
+    name: Deploy to Prod (Cloud Deploy Canary)
+    runs-on: ubuntu-latest
+    needs: [tests, lint]
+    # TODO Fase 2
+    if: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.PROD_WIF_PROVIDER }}
+          service_account: ${{ env.PROD_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Docker auth
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+      - name: Build + push
+        run: |
+          docker build -t ${{ env.PROD_IMAGE }}:${{ github.sha }} -t ${{ env.PROD_IMAGE }}:latest .
+          docker push --all-tags ${{ env.PROD_IMAGE }}
+      - name: Create Cloud Deploy release
+        run: |
+          gcloud deploy releases create prod-${GITHUB_SHA::8}-$(date +%Y%m%d%H%M%S) \
+            --project=${{ env.PROD_PROJECT_ID }} --region=${{ env.REGION }} \
+            --delivery-pipeline=${{ env.SERVICE_NAME }} \
+            --images=${{ env.SERVICE_NAME }}=${{ env.PROD_IMAGE }}:${{ github.sha }} \
+            --skaffold-file=skaffold.yaml
+
+  docker-build:
+    name: Docker Build (PR check)
+    runs-on: ubuntu-latest
+    needs: [tests, lint]
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t ${{ env.SERVICE_NAME }}:${{ github.sha }} .

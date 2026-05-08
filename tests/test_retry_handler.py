@@ -26,14 +26,11 @@ def test_exponential_backoff_delay(retry_handler):
     delay_1 = retry_handler.get_delay(1)
     delay_2 = retry_handler.get_delay(2)
 
-    assert 2 <= delay_0 < 3   # 2^0 = 1... base=2 so 2^0=1 -> actually 2**0=1+jitter
-    # backoff_base ** retry_count = 2**0=1, 2**1=2, 2**2=4
-    # Let me re-check: delay = base ** count + jitter
-    # For base=2, count=0: 1 + jitter (0..1) -> 1 to 2
-    # For base=2, count=1: 2 + jitter -> 2 to 3
-    # For base=2, count=2: 4 + jitter -> 4 to 5
-
-    assert delay_0 >= 1   # 2^0 = 1
+    # backoff_base ** retry_count + jitter(0..1)
+    # count=0: 1 + jitter -> [1, 2)
+    # count=1: 2 + jitter -> [2, 3)
+    # count=2: 4 + jitter -> [4, 5)
+    assert 1 <= delay_0 < 2
     assert delay_1 >= 2   # 2^1 = 2
     assert delay_2 >= 4   # 2^2 = 4
     assert delay_0 < delay_1 < delay_2

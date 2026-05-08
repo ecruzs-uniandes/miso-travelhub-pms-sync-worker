@@ -3,7 +3,6 @@ import uuid
 from datetime import date
 from typing import List
 from uuid import UUID
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.models.availability import Availability
 
@@ -18,50 +17,46 @@ class AvailabilityService:
         if not entries:
             return []
 
-        upsert_sql = text("""
-            INSERT INTO availability (id, room_id, fecha, unidades_disponibles, unidades_reservadas, ultima_actualizacion, fuente_actualizacion)
-            VALUES (:id, :room_id, :fecha, :disponibles, :reservadas, now(), :fuente)
-            ON CONFLICT (room_id, fecha)
-            DO UPDATE SET
-                unidades_disponibles = EXCLUDED.unidades_disponibles,
-                ultima_actualizacion = now(),
-                fuente_actualizacion = EXCLUDED.fuente_actualizacion
-        """)
+        results = []
+        for entry in entries:
+            room_id = UUID(str(entry["room_id"])) if not isinstance(entry["room_id"], UUID) else entry["room_id"]
+            fecha = entry["fecha"]
 
-        params = [
-            {
-                "id": str(uuid.uuid4()),
-                "room_id": str(entry["room_id"]),
-                "fecha": entry["fecha"],
-                "disponibles": entry["unidades_disponibles"],
-                "reservadas": entry.get("unidades_reservadas", 0),
-                "fuente": entry.get("fuente", "pms_webhook"),
-            }
-            for entry in entries
-        ]
-
-        self.db.execute(upsert_sql, params)
-        self.db.commit()
-
-        room_ids = list({str(e["room_id"]) for e in entries})
-        fechas = [e["fecha"] for e in entries]
-
-        result = (
-            self.db.query(Availability)
-            .filter(
-                Availability.room_id.in_(room_ids),
-                Availability.fecha.in_(fechas),
+            existing = (
+                self.db.query(Availability)
+                .filter(
+                    Availability.room_id == room_id,
+                    Availability.fecha == fecha,
+                )
+                .first()
             )
-            .all()
-        )
-        logger.info(f"Upserted {len(entries)} availability records")
-        return result
 
-    def get_conflicts(self, room_id: UUID, fechas: List[date]) -> List[Availability]:
+            if existing:
+                existing.unidades_disponibles = entry["unidades_disponibles"]
+                existing.fuente_actualizacion = entry.get("fuente", "pms_webhook")
+                results.append(existing)
+            else:
+                record = Availability(
+                    id=uuid.uuid4(),
+                    room_id=room_id,
+                    fecha=fecha,
+                    unidades_disponibles=entry["unidades_disponibles"],
+                    unidades_reservadas=entry.get("unidades_reservadas", 0),
+                    fuente_actualizacion=entry.get("fuente", "pms_webhook"),
+                )
+                self.db.add(record)
+                results.append(record)
+
+        self.db.commit()
+        logger.info(f"Upserted {len(entries)} availability records")
+        return results
+
+    def get_conflicts(self, room_id, fechas: List[date]) -> List[Availability]:
+        room_uuid = UUID(room_id) if isinstance(room_id, str) else room_id
         records = (
             self.db.query(Availability)
             .filter(
-                Availability.room_id == room_id,
+                Availability.room_id == room_uuid,
                 Availability.fecha.in_(fechas),
                 Availability.unidades_disponibles < Availability.unidades_reservadas,
             )

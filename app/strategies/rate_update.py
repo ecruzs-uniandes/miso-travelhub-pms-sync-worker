@@ -1,5 +1,6 @@
 import logging
 from datetime import date
+from uuid import UUID
 from sqlalchemy.orm import Session
 from app.schemas.sync_command import SyncCommand
 from app.strategies.base_strategy import BaseStrategy
@@ -59,9 +60,10 @@ class RateUpdateStrategy(BaseStrategy):
         if pms_room_id in room_mappings:
             return room_mappings[pms_room_id]
 
+        hotel_uuid = UUID(hotel_id) if isinstance(hotel_id, str) else hotel_id
         room = (
             db.query(Room)
-            .filter(Room.hotel_id == hotel_id, Room.pms_room_id == pms_room_id)
+            .filter(Room.hotel_id == hotel_uuid, Room.pms_room_id == pms_room_id)
             .first()
         )
         if room:

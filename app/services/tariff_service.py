@@ -1,6 +1,7 @@
 import logging
-import uuid
+import uuid as uuid_mod
 from typing import List
+from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.models.tariff import Tariff
@@ -13,10 +14,11 @@ class TariffService:
         self.db = db
 
     def upsert_tariff(self, room_id: str, fecha_inicio, fecha_fin, precio: float, moneda: str = "USD") -> Tariff:
+        room_uuid = UUID(room_id) if isinstance(room_id, str) else room_id
         existing = (
             self.db.query(Tariff)
             .filter(
-                Tariff.room_id == room_id,
+                Tariff.room_id == room_uuid,
                 Tariff.fecha_inicio == fecha_inicio,
                 Tariff.fecha_fin == fecha_fin,
             )
@@ -32,8 +34,8 @@ class TariffService:
             return existing
 
         tariff = Tariff(
-            id=uuid.uuid4(),
-            room_id=room_id,
+            id=uuid_mod.uuid4(),
+            room_id=room_uuid,
             fecha_inicio=fecha_inicio,
             fecha_fin=fecha_fin,
             precio_por_noche=precio,

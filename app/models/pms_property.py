@@ -18,7 +18,6 @@ class PmsProperty(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     hotel = relationship("Hotel", back_populates="pms_properties")
-    sync_events = relationship("SyncEvent", back_populates="pms_property")
 
     __table_args__ = (
         UniqueConstraint("hotel_id", "pms_provider", name="uq_pms_property_hotel_provider"),

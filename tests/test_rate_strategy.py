@@ -9,7 +9,7 @@ from app.models.tariff import Tariff
 
 def make_rate_command(hotel_id, room_id, rates):
     return SyncCommand(
-        event_id=uuid.uuid4(),
+        event_id=f"evt-{uuid.uuid4()}",
         event_type="rate_update",
         hotel_id=hotel_id,
         pms_provider="sabre",
