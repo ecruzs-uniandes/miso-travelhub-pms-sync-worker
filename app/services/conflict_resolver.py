@@ -33,7 +33,7 @@ class ConflictResolver:
             severity = "low"
 
         return {
-            "room_id": str(record.room_id),
+            "habitacionId": record.habitacionId,
             "fecha": str(record.fecha),
             "unidades_disponibles": disponibles,
             "unidades_reservadas": reservadas,
@@ -46,7 +46,7 @@ class ConflictResolver:
 
         if conflict_type == "critical_zero_availability":
             logger.error(
-                f"CRITICAL CONFLICT: hotel={hotel_id}, room={record.room_id}, "
+                f"CRITICAL CONFLICT: hotel={hotel_id}, habitacion={record.habitacionId}, "
                 f"fecha={record.fecha} — PMS reports 0 but {record.unidades_reservadas} reservations exist"
             )
             self.notification_client.notify_conflict(
@@ -58,7 +58,7 @@ class ConflictResolver:
 
         elif conflict_type == "overbooking":
             logger.warning(
-                f"OVERBOOKING DETECTED: hotel={hotel_id}, room={record.room_id}, "
+                f"OVERBOOKING DETECTED: hotel={hotel_id}, habitacion={record.habitacionId}, "
                 f"fecha={record.fecha} — available={record.unidades_disponibles}, "
                 f"reserved={record.unidades_reservadas}"
             )

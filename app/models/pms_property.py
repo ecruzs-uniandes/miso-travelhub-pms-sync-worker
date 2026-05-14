@@ -10,7 +10,8 @@ class PmsProperty(Base):
     __tablename__ = "pms_properties"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    hotel_id = Column(UUID(as_uuid=True), ForeignKey("hotels.id"), nullable=False)
+    # FK al hotel canónico (varchar id)
+    hotel_id = Column(String, ForeignKey("hotel.id"), nullable=False)
     pms_provider = Column(String(100), nullable=False)
     pms_property_id = Column(String(255), nullable=False)
     last_sync_at = Column(DateTime(timezone=True))

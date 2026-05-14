@@ -1,26 +1,35 @@
 import logging
 from datetime import date
-from uuid import UUID
+
 from sqlalchemy.orm import Session
+
 from app.schemas.sync_command import SyncCommand
-from app.strategies.base_strategy import BaseStrategy
 from app.services.availability_service import AvailabilityService
 from app.services.conflict_resolver import ConflictResolver
 from app.services.notification_client import NotificationClient
+from app.strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
 
 class AvailabilityUpdateStrategy(BaseStrategy):
+    """
+    Actualiza availability por habitacion.
+
+    El payload usa la key `habitacion_id` (varchar, canónica). Si llega legacy
+    como `room_id` se acepta por compatibilidad transicional pero ya debería
+    ser `habitacion_id` en producción.
+    """
+
     def execute(self, command: SyncCommand, db: Session) -> None:
         data = command.data
         hotel_id = str(command.hotel_id)
 
-        room_id = data.get("room_id")
+        habitacion_id = data.get("habitacion_id") or data.get("room_id")
         date_entries = data.get("dates", [])
 
-        if not room_id:
-            logger.warning(f"No room_id in payload for event {command.event_id}. Skipping.")
+        if not habitacion_id:
+            logger.warning(f"No habitacion_id in payload for event {command.event_id}. Skipping.")
             return
 
         availability_service = AvailabilityService(db)
@@ -41,7 +50,7 @@ class AvailabilityUpdateStrategy(BaseStrategy):
                 units = entry.get("unidades_disponibles", 0)
 
             upsert_entries.append({
-                "room_id": room_id,
+                "habitacionId": habitacion_id,
                 "fecha": fecha,
                 "unidades_disponibles": int(units),
                 "fuente": "pms_webhook",
@@ -52,12 +61,12 @@ class AvailabilityUpdateStrategy(BaseStrategy):
             availability_service.upsert_batch(upsert_entries)
 
         if fechas_list:
-            conflicts = availability_service.get_conflicts(room_id, fechas_list)
+            conflicts = availability_service.get_conflicts(habitacion_id, fechas_list)
             if conflicts:
-                logger.warning(f"Found {len(conflicts)} conflicts for room {room_id}")
+                logger.warning(f"Found {len(conflicts)} conflicts for habitacion {habitacion_id}")
                 conflict_resolver.resolve(hotel_id, conflicts)
 
         logger.info(
             f"AvailabilityUpdate completed: hotel={hotel_id}, "
-            f"room={room_id}, {len(upsert_entries)} records processed"
+            f"habitacion={habitacion_id}, {len(upsert_entries)} records processed"
         )

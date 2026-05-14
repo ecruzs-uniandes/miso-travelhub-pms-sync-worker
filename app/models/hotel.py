@@ -1,23 +1,27 @@
-import uuid
-from sqlalchemy import Column, String, Text, Boolean, DateTime
-from sqlalchemy.dialects.postgresql import UUID
+"""Hotel — modelo canónico del proyecto.
+
+pms-sync actualiza algunos campos vía webhook PMS (nombre, direccion, ciudad,
+pais) en `_sync_hotel_info`. La canónica tiene más columnas (latitud, longitud,
+estrellas, etc.) — las mapeamos para consistencia aunque no las actualicemos.
+"""
+from sqlalchemy import Boolean, Column, Float, Integer, String
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from app.database import Base
 
 
 class Hotel(Base):
-    __tablename__ = "hotels"
+    __tablename__ = "hotel"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    nombre = Column(String(255), nullable=False)
-    descripcion = Column(Text)
-    direccion = Column(String(500))
-    ciudad = Column(String(100))
-    pais = Column(String(100))
-    activo = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    id = Column(String, primary_key=True)
+    nombre = Column(String)
+    direccion = Column(String)
+    ciudad = Column(String)
+    pais = Column(String)
+    latitud = Column(Float)
+    longitud = Column(Float)
+    estrellas = Column(Integer)
+    pmsProveedor = Column("pmsProveedor", String)
+    activo = Column(Boolean)
 
-    rooms = relationship("Room", back_populates="hotel")
+    habitaciones = relationship("Habitacion", back_populates="hotel")
     pms_properties = relationship("PmsProperty", back_populates="hotel")

@@ -10,15 +10,16 @@ class Availability(Base):
     __tablename__ = "availability"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    room_id = Column(UUID(as_uuid=True), ForeignKey("rooms.id"), nullable=False)
+    # FK a habitacion canónica (varchar id)
+    habitacionId = Column("habitacionId", String, ForeignKey("habitacion.id"), nullable=False)
     fecha = Column(Date, nullable=False)
     unidades_disponibles = Column(Integer, default=0)
     unidades_reservadas = Column(Integer, default=0)
     ultima_actualizacion = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     fuente_actualizacion = Column(String(50), default="pms_webhook")
 
-    room = relationship("Room", back_populates="availabilities")
+    habitacion = relationship("Habitacion", back_populates="availabilities")
 
     __table_args__ = (
-        UniqueConstraint("room_id", "fecha", name="uq_availability_room_fecha"),
+        UniqueConstraint("habitacionId", "fecha", name="uq_availability_habitacion_fecha"),
     )

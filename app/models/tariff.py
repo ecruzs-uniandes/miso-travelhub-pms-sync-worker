@@ -10,7 +10,8 @@ class Tariff(Base):
     __tablename__ = "tariffs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    room_id = Column(UUID(as_uuid=True), ForeignKey("rooms.id"), nullable=False)
+    # FK a habitacion canónica (varchar id)
+    habitacionId = Column("habitacionId", String, ForeignKey("habitacion.id"), nullable=False)
     fecha_inicio = Column(Date, nullable=False)
     fecha_fin = Column(Date, nullable=False)
     precio_por_noche = Column(Numeric(10, 2), nullable=False)
@@ -19,4 +20,4 @@ class Tariff(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    room = relationship("Room", back_populates="tariffs")
+    habitacion = relationship("Habitacion", back_populates="tariffs")

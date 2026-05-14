@@ -1,16 +1,26 @@
 import logging
 from datetime import date
-from uuid import UUID
+
 from sqlalchemy.orm import Session
+
 from app.schemas.sync_command import SyncCommand
-from app.strategies.base_strategy import BaseStrategy
 from app.services.tariff_service import TariffService
-from app.models.room import Room
+from app.strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
 
 class RateUpdateStrategy(BaseStrategy):
+    """
+    Actualiza tarifas en `tariffs` por habitacion.
+
+    Después del refactor a habitacion canónica, NO podemos resolver `pms_room_id`
+    contra `habitacion` (la canónica no tiene esa columna). El caller debe
+    proveer `habitacion_id` directamente en `room_mappings` (clave = pms_room_id,
+    valor = habitacion.id varchar) o agregar el mapping en el campo nuevo
+    `room_mappings`. Si no hay mapping, el rate se skip-ea.
+    """
+
     def execute(self, command: SyncCommand, db: Session) -> None:
         data = command.data
         rates = data.get("rates", [])
@@ -22,11 +32,13 @@ class RateUpdateStrategy(BaseStrategy):
 
         for rate in rates:
             pms_room_id = rate.get("pms_room_id")
-            room_id = self._resolve_room_id(db, hotel_id, pms_room_id, room_mappings)
+            habitacion_id = room_mappings.get(pms_room_id)
 
-            if not room_id:
+            if not habitacion_id:
                 logger.warning(
-                    f"Cannot resolve room for pms_room_id={pms_room_id}, hotel={hotel_id}. Skipping."
+                    "Cannot resolve habitacion for pms_room_id=%s, hotel=%s — "
+                    "needs room_mappings entry. Skipping.",
+                    pms_room_id, hotel_id,
                 )
                 continue
 
@@ -42,7 +54,7 @@ class RateUpdateStrategy(BaseStrategy):
             )
 
             entries.append({
-                "room_id": room_id,
+                "habitacionId": habitacion_id,
                 "fecha_inicio": fecha_inicio,
                 "fecha_fin": fecha_fin,
                 "precio_por_noche": rate.get("precio_por_noche", 0),
@@ -53,20 +65,6 @@ class RateUpdateStrategy(BaseStrategy):
             tariff_service.upsert_batch(entries)
 
         logger.info(
-            f"RateUpdate completed: hotel={hotel_id}, {len(entries)} tariffs processed"
+            "RateUpdate completed: hotel=%s, %d tariffs processed",
+            hotel_id, len(entries),
         )
-
-    def _resolve_room_id(self, db: Session, hotel_id: str, pms_room_id: str, room_mappings: dict) -> str | None:
-        if pms_room_id in room_mappings:
-            return room_mappings[pms_room_id]
-
-        hotel_uuid = UUID(hotel_id) if isinstance(hotel_id, str) else hotel_id
-        room = (
-            db.query(Room)
-            .filter(Room.hotel_id == hotel_uuid, Room.pms_room_id == pms_room_id)
-            .first()
-        )
-        if room:
-            return str(room.id)
-
-        return None
