@@ -38,9 +38,9 @@ pms-integration-services
         ▼
   pms-sync-worker
    ├── CommandHandler (Strategy Router)
-   │     ├── AvailabilityUpdateStrategy → UPSERT availability
-   │     ├── RateUpdateStrategy         → UPSERT tariffs
-   │     └── PropertySyncStrategy       → Sync completo (transacción)
+   │     ├── AvailabilityUpdateStrategy → UPSERT disponibilidad (canonical)
+   │     ├── RateUpdateStrategy         → UPSERT tarifa (canonical)
+   │     └── PropertySyncStrategy       → Sync hotel canonical (rooms upsert disabled, pendiente contrato con search-service)
    │
    ├── ConflictResolver → detecta overbooking → NotificationClient
    ├── CircuitBreaker   → protege BD y notification-services
@@ -120,19 +120,17 @@ Todos los mensajes en el topic `pms-sync-queue` siguen este esquema base (public
 
 ### `availability_update`
 
-Actualiza la disponibilidad de habitaciones para fechas específicas.
+Actualiza la disponibilidad de habitaciones para fechas específicas en la tabla canonical `disponibilidad`.
 
 **Payload `data`:**
 ```json
 {
-  "room_id": "uuid-room-travelhub",
-  "room_type": "Suite",
+  "habitacion_id": "b1000000-0000-0000-0000-000000000002",
   "dates": [
     {
       "date": "2025-07-01",
       "available_units": 5,
-      "rate": 180.00,
-      "currency": "USD"
+      "unidades_reservadas": 0
     }
   ]
 }
@@ -140,21 +138,21 @@ Actualiza la disponibilidad de habitaciones para fechas específicas.
 
 | Campo | Tipo | Descripción |
 |---|---|---|
-| `room_id` | UUID | ID de la habitación en TravelHub. **Debe existir en `rooms.id`**. (No hay mapeo PMS→TravelHub en esta strategy.) |
-| `room_type` | string | Etiqueta informativa (no se persiste). |
+| `habitacion_id` | varchar | ID canonical de la habitación. **Debe existir en `habitacion.id`**. Acepta legacy `room_id` por compat transicional. |
 | `dates[].date` (o `fecha`) | string (`YYYY-MM-DD`) | Fecha de disponibilidad. |
-| `dates[].available_units` (o `unidades_disponibles`) | int | Unidades disponibles reportadas por el PMS. |
+| `dates[].available_units` (o `unidadesDisponibles`/`unidades_disponibles`) | int | Unidades disponibles reportadas por el PMS. |
+| `dates[].unidades_reservadas` (o `unidadesReservadas`) | int | Reservas actuales (default 0). |
 
-> El strategy acepta tanto las claves en inglés (`date`, `available_units`) como en español (`fecha`, `unidades_disponibles`). Internamente prioriza las inglesas.
+> El strategy acepta claves en inglés (`date`, `available_units`), snake_case español (`fecha`, `unidades_disponibles`) o camelCase canonical (`unidadesDisponibles`). Prioridad: inglesa → snake_case → camelCase.
 
-**SQL ejecutado (UPSERT por `(room_id, fecha)`):**
+**SQL ejecutado (UPSERT en `disponibilidad` por `(habitacionId, fecha)`):**
 ```sql
--- Si existe: actualiza unidades_disponibles + ultima_actualizacion
--- Si no:    inserta con unidades_reservadas=0, fuente_actualizacion='pms_webhook'
+-- Si existe: actualiza unidadesDisponibles + ultimaActualizacion
+-- Si no:    inserta con unidadesReservadas=0, fuenteActualizacion='pms_webhook'
 ```
 
-Después del upsert el strategy ejecuta `get_conflicts(room_id, fechas)`: si para alguna fecha
-`unidades_disponibles < unidades_reservadas`, el `ConflictResolver` clasifica el conflicto
+Después del upsert el strategy ejecuta `get_conflicts(habitacion_id, fechas)`: si para alguna fecha
+`unidadesDisponibles < unidadesReservadas`, el `ConflictResolver` clasifica el conflicto
 (`critical_zero_availability` u `overbooking`) y notifica via `NotificationClient`.
 
 **Ejemplo completo (mensaje en `pms-sync-queue`):**
@@ -169,8 +167,7 @@ Después del upsert el strategy ejecuta `get_conflicts(room_id, fechas)`: si par
   "timestamp": "2026-04-25T10:00:00Z",
   "retry_count": 0,
   "data": {
-    "room_id": "b1000000-0000-0000-0000-000000000002",
-    "room_type": "Suite",
+    "habitacion_id": "b1000000-0000-0000-0000-000000000002",
     "dates": [
       {"date": "2026-07-01", "available_units": 5},
       {"date": "2026-07-02", "available_units": 4},
@@ -184,21 +181,22 @@ Después del upsert el strategy ejecuta `get_conflicts(room_id, fechas)`: si par
 
 ### `rate_update`
 
-Actualiza tarifas (precio por noche) para rangos de fechas.
+Actualiza tarifas (precio por noche) para rangos de fechas en la tabla canonical `tarifa`.
 
 **Payload `data`:**
 ```json
 {
   "room_mappings": {
-    "PMS-ROOM-001": "uuid-room-travelhub"
+    "PMS-ROOM-001": "b1000000-0000-0000-0000-000000000001"
   },
   "rates": [
     {
       "pms_room_id": "PMS-ROOM-001",
-      "fecha_inicio": "2025-07-01",
-      "fecha_fin": "2025-07-31",
-      "precio_por_noche": 120.00,
-      "moneda": "USD"
+      "fechaInicio": "2025-07-01T00:00:00+00:00",
+      "fechaFin": "2025-07-31T23:59:59+00:00",
+      "precioBase": 120.00,
+      "moneda": "USD",
+      "descuento": 0.0
     }
   ]
 }
@@ -206,34 +204,37 @@ Actualiza tarifas (precio por noche) para rangos de fechas.
 
 | Campo | Tipo | Descripción |
 |---|---|---|
-| `rates[].pms_room_id` | string | ID de la habitación en el PMS |
-| `rates[].fecha_inicio` | string (ISO 8601) | Inicio del período de vigencia |
-| `rates[].fecha_fin` | string (ISO 8601) | Fin del período de vigencia |
-| `rates[].precio_por_noche` | float | Precio por noche en la moneda indicada |
-| `rates[].moneda` | string | Código ISO 4217 (`USD`, `COP`, `EUR`) |
+| `room_mappings` | dict | Mapping `pms_room_id → habitacion.id` (varchar canonical). **Obligatorio** — la canonical `habitacion` no tiene `pms_room_id`. Sin mapping para un rate, se omite con warning. |
+| `rates[].pms_room_id` | string | ID de la habitación en el PMS — se resuelve a `habitacionId` via `room_mappings`. |
+| `rates[].fechaInicio` (o `fecha_inicio`) | string ISO 8601 | Inicio del período. timestamptz. |
+| `rates[].fechaFin` (o `fecha_fin`) | string ISO 8601 | Fin del período. timestamptz. |
+| `rates[].precioBase` (o `precio_base`/`precio_por_noche`) | float | Precio base por noche. |
+| `rates[].moneda` | string | Código ISO 4217 (`USD`, `COP`, `EUR`). |
+| `rates[].descuento` | float | Rango [0, 1]. Default 0.0. |
 
-**Comportamiento UPSERT:**
-- Si existe `(room_id, fecha_inicio, fecha_fin)` → actualiza `precio_por_noche`
-- Si no existe → inserta nuevo registro
+**Comportamiento UPSERT en `tarifa`:**
+- Si existe `(habitacionId, fechaInicio, fechaFin)` → actualiza `precioBase`, `moneda`, `descuento`.
+- Si no existe → inserta nuevo registro.
 
 **Ejemplo completo:**
 ```json
 {
   "event_id": "b2c3d4e5-0000-0000-0000-000000000001",
   "event_type": "rate_update",
-  "hotel_id": "550e8400-e29b-41d4-a716-446655440000",
+  "hotel_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "pms_provider": "sabre",
   "pms_property_id": "SABRE-001",
   "retry_count": 0,
   "data": {
-    "room_mappings": {"PMS-ROOM-001": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"},
+    "room_mappings": {"PMS-ROOM-001": "b1000000-0000-0000-0000-000000000002"},
     "rates": [
       {
         "pms_room_id": "PMS-ROOM-001",
-        "fecha_inicio": "2025-12-20",
-        "fecha_fin": "2026-01-05",
-        "precio_por_noche": 280.00,
-        "moneda": "USD"
+        "fechaInicio": "2025-12-20T00:00:00+00:00",
+        "fechaFin": "2026-01-05T23:59:59+00:00",
+        "precioBase": 280.00,
+        "moneda": "USD",
+        "descuento": 0.0
       }
     ]
   }
@@ -244,9 +245,9 @@ Actualiza tarifas (precio por noche) para rangos de fechas.
 
 ### `property_sync`
 
-Sincronización completa de una propiedad. Ejecuta en una sola transacción.
+Sincronización completa de una propiedad. Solo `property_info` se persiste actualmente — `rooms`, `availability`, `tariffs` están **deshabilitados** en este sprint.
 
-**Payload `data`:**
+**Payload `data` (solo `property_info` se procesa hoy):**
 ```json
 {
   "property_info": {
@@ -254,33 +255,17 @@ Sincronización completa de una propiedad. Ejecuta en una sola transacción.
     "direccion": "Calle 12 #4-72",
     "ciudad": "Bogotá",
     "pais": "Colombia"
-  },
-  "rooms": [
-    {"pms_room_id": "OPERA-101", "nombre": "Habitación Estándar", "capacidad": 2}
-  ],
-  "availability": [
-    {"pms_room_id": "OPERA-101", "fecha": "2025-07-01", "unidades_disponibles": 1}
-  ],
-  "tariffs": [
-    {
-      "pms_room_id": "OPERA-101",
-      "fecha_inicio": "2025-07-01",
-      "fecha_fin": "2025-07-31",
-      "precio_por_noche": 95.00,
-      "moneda": "USD"
-    }
-  ]
+  }
 }
 ```
 
-Todos los campos de `data` son opcionales. Solo se procesan los que están presentes.
-
-**Flujo de ejecución:**
-1. `property_info` → actualiza campos del hotel si cambiaron
-2. `rooms` → crea nuevas habitaciones, desactiva las que ya no existen en el PMS
-3. `availability` → UPSERT en tabla `availability`
-4. `tariffs` → UPSERT en tabla `tariffs`
-5. `COMMIT` — si cualquier paso falla → `ROLLBACK` completo
+**Flujo de ejecución (actual):**
+1. `property_info` → actualiza cols `nombre`, `direccion`, `ciudad`, `pais` en `hotel` canonical si llegan en el payload.
+2. `rooms`, `availability`, `tariffs` si llegan → se loguea warning y se omiten:
+   - La canonical `habitacion` tiene 11 cols NOT NULL (`tipo`, `categoria`, `capacidadMaxima`, `descripcion`, `imagenes JSON`, `tipo_habitacion`, `tipo_cama JSON`, `tamano_habitacion`, `amenidades JSON`, etc.) que el webhook PMS no provee.
+   - Pendiente: definir contrato con `search-service` (owner de habitacion) o tabla auxiliar de mapping.
+   - Para sync de tarifas/disponibilidad usar los event_types `rate_update` y `availability_update` (con `room_mappings`).
+3. `COMMIT` — si falla → `ROLLBACK`.
 
 ---
 
