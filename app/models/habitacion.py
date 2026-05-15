@@ -25,5 +25,5 @@ class Habitacion(Base):
     amenidades = Column(JSON, nullable=False)
 
     hotel = relationship("Hotel", back_populates="habitaciones")
-    availabilities = relationship("Availability", back_populates="habitacion")
-    tariffs = relationship("Tariff", back_populates="habitacion")
+    disponibilidades = relationship("Disponibilidad", back_populates="habitacion")
+    tarifas = relationship("Tarifa", back_populates="habitacion")

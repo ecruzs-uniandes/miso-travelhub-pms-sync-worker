@@ -1,13 +1,9 @@
 import logging
-from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.models.habitacion import Habitacion
 from app.models.hotel import Hotel
 from app.schemas.sync_command import SyncCommand
-from app.services.availability_service import AvailabilityService
-from app.services.tariff_service import TariffService
 from app.strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)

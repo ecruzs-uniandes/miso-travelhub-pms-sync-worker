@@ -1,6 +1,6 @@
 import logging
 from typing import List
-from app.models.availability import Availability
+from app.models.disponibilidad import Disponibilidad
 from app.services.notification_client import NotificationClient
 
 logger = logging.getLogger(__name__)
@@ -10,7 +10,7 @@ class ConflictResolver:
     def __init__(self, notification_client: NotificationClient):
         self.notification_client = notification_client
 
-    def resolve(self, hotel_id: str, conflicts: List[Availability]) -> List[dict]:
+    def resolve(self, hotel_id: str, conflicts: List[Disponibilidad]) -> List[dict]:
         resolved = []
         for record in conflicts:
             conflict_info = self._analyze_conflict(hotel_id, record)
@@ -18,9 +18,9 @@ class ConflictResolver:
             self._handle_conflict(hotel_id, record, conflict_info)
         return resolved
 
-    def _analyze_conflict(self, hotel_id: str, record: Availability) -> dict:
-        disponibles = record.unidades_disponibles
-        reservadas = record.unidades_reservadas
+    def _analyze_conflict(self, hotel_id: str, record: Disponibilidad) -> dict:
+        disponibles = record.unidadesDisponibles
+        reservadas = record.unidadesReservadas
 
         if disponibles == 0 and reservadas > 0:
             conflict_type = "critical_zero_availability"
@@ -35,19 +35,19 @@ class ConflictResolver:
         return {
             "habitacionId": record.habitacionId,
             "fecha": str(record.fecha),
-            "unidades_disponibles": disponibles,
-            "unidades_reservadas": reservadas,
+            "unidadesDisponibles": disponibles,
+            "unidadesReservadas": reservadas,
             "conflict_type": conflict_type,
             "severity": severity,
         }
 
-    def _handle_conflict(self, hotel_id: str, record: Availability, conflict_info: dict):
+    def _handle_conflict(self, hotel_id: str, record: Disponibilidad, conflict_info: dict):
         conflict_type = conflict_info["conflict_type"]
 
         if conflict_type == "critical_zero_availability":
             logger.error(
                 f"CRITICAL CONFLICT: hotel={hotel_id}, habitacion={record.habitacionId}, "
-                f"fecha={record.fecha} — PMS reports 0 but {record.unidades_reservadas} reservations exist"
+                f"fecha={record.fecha} — PMS reports 0 but {record.unidadesReservadas} reservations exist"
             )
             self.notification_client.notify_conflict(
                 hotel_id=hotel_id,
@@ -59,8 +59,8 @@ class ConflictResolver:
         elif conflict_type == "overbooking":
             logger.warning(
                 f"OVERBOOKING DETECTED: hotel={hotel_id}, habitacion={record.habitacionId}, "
-                f"fecha={record.fecha} — available={record.unidades_disponibles}, "
-                f"reserved={record.unidades_reservadas}"
+                f"fecha={record.fecha} — available={record.unidadesDisponibles}, "
+                f"reserved={record.unidadesReservadas}"
             )
             self.notification_client.notify_conflict(
                 hotel_id=hotel_id,

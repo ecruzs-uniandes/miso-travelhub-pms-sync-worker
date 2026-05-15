@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 
 class AvailabilityUpdateStrategy(BaseStrategy):
     """
-    Actualiza availability por habitacion.
+    Upsert disponibilidad canónica por habitación.
 
-    El payload usa la key `habitacion_id` (varchar, canónica). Si llega legacy
-    como `room_id` se acepta por compatibilidad transicional pero ya debería
-    ser `habitacion_id` en producción.
+    El payload acepta `habitacion_id` (canónico). Legacy `room_id` se acepta
+    transicionalmente. Por cada entrada de `dates[]`:
+      date | fecha                    → fecha
+      available_units | unidadesDisponibles → unidadesDisponibles
+      unidades_reservadas | unidadesReservadas → unidadesReservadas (default 0)
     """
 
     def execute(self, command: SyncCommand, db: Session) -> None:
@@ -47,12 +49,15 @@ class AvailabilityUpdateStrategy(BaseStrategy):
 
             units = entry.get("available_units")
             if units is None:
-                units = entry.get("unidades_disponibles", 0)
+                units = entry.get("unidadesDisponibles", entry.get("unidades_disponibles", 0))
+
+            reserved = entry.get("unidadesReservadas", entry.get("unidades_reservadas", 0))
 
             upsert_entries.append({
                 "habitacionId": habitacion_id,
                 "fecha": fecha,
-                "unidades_disponibles": int(units),
+                "unidadesDisponibles": int(units),
+                "unidadesReservadas": int(reserved),
                 "fuente": "pms_webhook",
             })
             fechas_list.append(fecha)
