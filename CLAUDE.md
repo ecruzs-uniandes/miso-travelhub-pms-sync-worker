@@ -31,7 +31,7 @@ app/
 │   ├── command_handler.py        # router por event_type → strategy
 │   └── worker_runner.py          # orquesta consumer task / fallback DB poll
 ├── strategies/                   # availability_update, rate_update, property_sync
-├── services/                     # availability, tariff, sync_event, conflict_resolver, notification_client
+├── services/                     # availability_service (writes disponibilidad), tarifa_service (writes tarifa), sync_event, conflict_resolver, notification_client
 ├── resilience/                   # circuit_breaker, retry_handler
 ├── schemas/sync_command.py       # event_id: str, hotel_id: UUID
 └── models/                       # SQLAlchemy alineados con schema PG real
@@ -56,7 +56,9 @@ Este servicio NO expone API de negocio: la entrada es Kafka, no HTTP.
 | HTTP out | `NOTIFICATION_SERVICE_URL` | POST a notification-services cuando el conflict resolver detecta `critical_zero_availability` u `overbooking`. |
 
 > El esquema completo de `SyncCommand` y los `data` por `event_type` están documentados en `README.md` y en `pms-sync-worker.postman_collection.json` (carpetas `Kafka Messages — *`).
-> **Strategy `availability_update` consume `data.room_id` directamente** (UUID de la tabla `rooms` de TravelHub) — no hay mapeo PMS→TravelHub para este event_type. Las strategies `rate_update` y `property_sync` sí usan `pms_room_id` con `room_mappings` o lookup por `Room.pms_room_id`.
+> **Strategy `availability_update`** acepta `data.habitacion_id` (canonical varchar) — o `data.room_id` por compat transicional. Sin mapeo PMS→TravelHub para este event_type.
+> **Strategy `rate_update`** requiere `data.room_mappings` (dict `pms_room_id → habitacion.id` varchar) porque la canonical `habitacion` no tiene `pms_room_id`. Si falta el mapping para un rate, se loguea warning y se omite.
+> **Strategy `property_sync`** en este sprint hace solo `_sync_hotel_info` (actualiza nombre/direccion/ciudad/pais en `hotel` canonical). El upsert de rooms está deshabilitado con warning porque la canonical `habitacion` tiene 11 cols NOT NULL que el webhook PMS no provee — pendiente contrato con search-service.
 > **Guía de testing end-to-end** (preparar BD, obtener JWT, enviar webhook, ver el worker procesar): ver `../PMS_TESTING_GUIDE.md` en la raíz del monorepo.
 
 ## Despliegue actual
@@ -70,20 +72,14 @@ Este servicio NO expone API de negocio: la entrada es Kafka, no HTTP.
 
 `main` — CI/CD pipeline activo (deploy-prod habilitado en commit `e3400df` de 2026-05-08; antes estaba en `if: false # TODO Fase 2`).
 
-## Tests skipped (TODO arreglar)
+## Tests (2026-05-14)
 
-5 archivos de test tienen `pytestmark = pytest.mark.skip` con razón: el refactor de modelos
-SQLAlchemy para alinear con el schema PG real (commit anterior) rompió fixtures viejos.
+`pytest` corre 40 tests pasando contra sqlite in-memory.
 
-| Archivo | Razón |
-|---|---|
-| `test_command_handler.py` | usa `SyncEvent(pms_property_id=...)` que ya no existe |
-| `test_sync_event_service.py` | mismo problema |
-| `test_property_sync.py` | usa `event_id=uuid.uuid4()` (ahora `str`), también pms_property_id |
-| `test_rate_strategy.py` | mismo |
-| `test_availability_strategy.py` | mismo |
+**Tests eliminados en el refactor canonical** (estaban en `pytest.mark.skip` desde hace un sprint):
+- `test_availability_strategy.py`, `test_rate_strategy.py`, `test_property_sync.py`, `test_conflict_resolver.py`
 
-**TODO**: reescribir con la nueva schema (`event_id: str`, `hotel_id: UUID`, `payload_hash` en vez de `payload`, etc.).
+Tenían fixtures contra modelos legacy (`Room`, `Availability` con cols snake_case, `Tariff.precio_por_noche`). Borrados por desgaste. Pendiente reescribir contra los modelos canonical (`Habitacion`, `Disponibilidad` camelCase, `Tarifa.precioBase`).
 
 ## Network setup (gotchas críticos)
 

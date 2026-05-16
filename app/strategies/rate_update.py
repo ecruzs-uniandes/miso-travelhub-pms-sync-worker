@@ -1,72 +1,74 @@
 import logging
-from datetime import date
-from uuid import UUID
+from datetime import datetime
+
 from sqlalchemy.orm import Session
+
 from app.schemas.sync_command import SyncCommand
+from app.services.tarifa_service import TarifaService
 from app.strategies.base_strategy import BaseStrategy
-from app.services.tariff_service import TariffService
-from app.models.room import Room
 
 logger = logging.getLogger(__name__)
 
 
+def _parse_dt(value) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value))
+
+
 class RateUpdateStrategy(BaseStrategy):
+    """
+    Actualiza tarifas canónicas en `tarifa` por habitación.
+
+    El caller debe proveer `room_mappings` (pms_room_id → habitacion.id varchar).
+    Si no hay mapping para un pms_room_id, el rate se omite con warning.
+
+    Payload `rates[*]` esperado:
+      pms_room_id   → resolvedo a habitacionId via room_mappings
+      precio_base | precio_por_noche  → precioBase
+      moneda                          → moneda
+      fecha_inicio | fechaInicio      → fechaInicio (str ISO o datetime)
+      fecha_fin    | fechaFin         → fechaFin
+      descuento                       → descuento (default 0.0)
+    """
+
     def execute(self, command: SyncCommand, db: Session) -> None:
         data = command.data
         rates = data.get("rates", [])
         room_mappings = data.get("room_mappings", {})
         hotel_id = str(command.hotel_id)
 
-        tariff_service = TariffService(db)
+        tarifa_service = TarifaService(db)
         entries = []
 
         for rate in rates:
             pms_room_id = rate.get("pms_room_id")
-            room_id = self._resolve_room_id(db, hotel_id, pms_room_id, room_mappings)
+            habitacion_id = room_mappings.get(pms_room_id)
 
-            if not room_id:
+            if not habitacion_id:
                 logger.warning(
-                    f"Cannot resolve room for pms_room_id={pms_room_id}, hotel={hotel_id}. Skipping."
+                    "Cannot resolve habitacion for pms_room_id=%s, hotel=%s — "
+                    "needs room_mappings entry. Skipping.",
+                    pms_room_id, hotel_id,
                 )
                 continue
 
-            fecha_inicio = (
-                date.fromisoformat(rate["fecha_inicio"])
-                if isinstance(rate["fecha_inicio"], str)
-                else rate["fecha_inicio"]
-            )
-            fecha_fin = (
-                date.fromisoformat(rate["fecha_fin"])
-                if isinstance(rate["fecha_fin"], str)
-                else rate["fecha_fin"]
-            )
+            fecha_inicio = _parse_dt(rate.get("fechaInicio") or rate["fecha_inicio"])
+            fecha_fin = _parse_dt(rate.get("fechaFin") or rate["fecha_fin"])
 
             entries.append({
-                "room_id": room_id,
-                "fecha_inicio": fecha_inicio,
-                "fecha_fin": fecha_fin,
-                "precio_por_noche": rate.get("precio_por_noche", 0),
+                "habitacionId": habitacion_id,
+                "fechaInicio": fecha_inicio,
+                "fechaFin": fecha_fin,
+                "precioBase": rate.get("precioBase") or rate.get("precio_base") or rate.get("precio_por_noche", 0),
                 "moneda": rate.get("moneda", "USD"),
+                "descuento": rate.get("descuento", 0.0),
             })
 
         if entries:
-            tariff_service.upsert_batch(entries)
+            tarifa_service.upsert_batch(entries)
 
         logger.info(
-            f"RateUpdate completed: hotel={hotel_id}, {len(entries)} tariffs processed"
+            "RateUpdate completed: hotel=%s, %d tarifas processed",
+            hotel_id, len(entries),
         )
-
-    def _resolve_room_id(self, db: Session, hotel_id: str, pms_room_id: str, room_mappings: dict) -> str | None:
-        if pms_room_id in room_mappings:
-            return room_mappings[pms_room_id]
-
-        hotel_uuid = UUID(hotel_id) if isinstance(hotel_id, str) else hotel_id
-        room = (
-            db.query(Room)
-            .filter(Room.hotel_id == hotel_uuid, Room.pms_room_id == pms_room_id)
-            .first()
-        )
-        if room:
-            return str(room.id)
-
-        return None
