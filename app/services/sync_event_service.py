@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timezone
-from uuid import UUID
 from sqlalchemy.orm import Session
 from app.models.sync_event import SyncEvent
 from app.models.pms_property import PmsProperty
@@ -43,7 +42,7 @@ class SyncEventService:
         self.db.commit()
         logger.debug(f"SyncEvent {event_id} status updated to '{status}'")
 
-    def update_pms_property_last_sync(self, hotel_id: UUID, pms_provider: str):
+    def update_pms_property_last_sync(self, hotel_id: str, pms_provider: str):
         pms_property = (
             self.db.query(PmsProperty)
             .filter(
