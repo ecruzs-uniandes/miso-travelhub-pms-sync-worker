@@ -89,7 +89,7 @@ Todos los mensajes en el topic `pms-sync-queue` siguen este esquema base (public
   "command_id": "uuid-v4-generado-por-integration",
   "event_id": "evt-2026-001",
   "event_type": "availability_update | rate_update | property_sync",
-  "hotel_id": "uuid-v4",
+  "hotel_id": "d2e3f4a5-b6c7-8901-def0-234567890abc",
   "pms_provider": "hotelbeds | sabre | opera | ...",
   "pms_property_id": "string",
   "timestamp": "2026-04-25T10:00:00Z",
@@ -105,7 +105,7 @@ Todos los mensajes en el topic `pms-sync-queue` siguen este esquema base (public
 | `command_id` | UUID | No | Generado por `SyncCommand.create()` en pms-integration. |
 | `event_id` | string | Sí | Identificador único del evento (string libre, **no UUID**). Clave de idempotencia. |
 | `event_type` | string | Sí | Tipo: `availability_update`, `rate_update`, `property_sync`. Otros → `NonRetryableError`. |
-| `hotel_id` | UUID | Sí | ID del hotel en TravelHub. |
+| `hotel_id` | string | Sí | ID del hotel en TravelHub (varchar canonical post-refactor 2026-05-14). Se acepta también UUID — el field_validator del schema coerce con `str(v)`. |
 | `pms_provider` | string | Sí | Nombre del proveedor PMS (`hotelbeds`, `sabre`, ...). |
 | `pms_property_id` | string | No | ID de la propiedad en el PMS externo. |
 | `timestamp` | datetime | No | Timestamp original del evento PMS. |
