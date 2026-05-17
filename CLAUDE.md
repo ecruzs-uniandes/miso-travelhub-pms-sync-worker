@@ -33,7 +33,7 @@ app/
 ├── strategies/                   # availability_update, rate_update, property_sync
 ├── services/                     # availability_service (writes disponibilidad), tarifa_service (writes tarifa), sync_event, conflict_resolver, notification_client
 ├── resilience/                   # circuit_breaker, retry_handler
-├── schemas/sync_command.py       # event_id: str, hotel_id: UUID
+├── schemas/sync_command.py       # event_id: str, hotel_id: str (con field_validator que coerce UUID→str, ver bug 2026-05-16)
 └── models/                       # SQLAlchemy alineados con schema PG real
 .github/workflows/ci.yml          # WIF + Cloud Run direct VPC
 clouddeploy.yaml                  # canary 10→50→100
@@ -71,6 +71,28 @@ Este servicio NO expone API de negocio: la entrada es Kafka, no HTTP.
 ### Branch de trabajo
 
 `main` — CI/CD pipeline activo (deploy-prod habilitado en commit `e3400df` de 2026-05-08; antes estaba en `if: false # TODO Fase 2`).
+
+## Bugs resueltos
+
+### ✅ 2026-05-16 — Type mismatch UUID vs varchar en queries de `sync_events` y `pms_properties`
+
+Síntoma: cualquier mensaje en `pms-sync-queue` fallaba con `operator does not exist: character varying = uuid` en la query `SELECT ... FROM sync_events WHERE hotel_id == :hotel_id`. Worker entraba en loop de retry → DLQ → en algunos casos el Kafka consumer crasheaba con `InFailedSqlTransaction`.
+
+Causa: el refactor canonical (2026-05-14) pasó `hotel.id` a varchar en la BD, pero `SyncCommand.hotel_id` se quedó como `UUID` en Pydantic. SQLAlchemy enviaba el UUID al WHERE y PG no podía comparar `varchar = uuid`. Adicionalmente las FKs hacia `hotel.id` quedaron en estado inconsistente entre DEV (drift residual UUID en columnas) y PROD (ya migrado a varchar) — runbook completo en `../COMANDOS_UTILES.md` §6.Z.
+
+Fixes (worker):
+- **PR #2 (`2cf9b5a`)**: `app/schemas/sync_command.py` — `hotel_id: UUID` → `hotel_id: str`. `app/services/sync_event_service.py` — `update_pms_property_last_sync(hotel_id: UUID)` → `(hotel_id: str)`.
+- **PR #3 (`864572f`) hotfix**: Pydantic v2 con `hotel_id: str` rechaza objetos `UUID` (a diferencia de v1). Bug colateral: `worker_runner.py` DB poll lee `pms_property.hotel_id` que viene como `UUID` desde SQLAlchemy → falla validación → loop infinito → test `test_db_poll_processes_queued_event` colgaba el CI hasta timeout. Fix: `@field_validator("hotel_id", mode="before")` que normaliza con `str(v)`.
+
+Validación smoke E2E DEV (`pms-sync-worker-00014-scv`):
+```
+Processing command: event_id=smoke-final2-..., event_type=availability_update, hotel=d2e3f4a5-...
+Command smoke-final2-... completed successfully
+sync_event.status = "completed", retry_count = 0
+disponibilidad.unidadesDisponibles 5 → 2 → 4 → 3 (consistente)
+```
+
+Canary PROD (`prod-3cb97d51-20260517021832`) — SUCCEEDED 2026-05-17.
 
 ## Tests (2026-05-14)
 
